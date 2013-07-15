@@ -9,56 +9,6 @@ module RailsAdmin
 
   class CSVConverter
 
-    class Encoder
-      def initialize(to, from)
-        @to = to
-        @from = from
-      end
-
-      def self.factory(*args)
-        if RUBY_VERSION < "1.9"
-          IconvEncoder.new(*args)
-        else
-          StringEncoder.new(*args)
-        end
-      end
-
-      def encode(string)
-        raise NotImplementedError
-      end
-    end
-
-    class IconvEncoder < Encoder
-      def initialize(*args)
-        super(*args)
-        generate_iconv_instance unless @to == @from
-      end
-
-      def generate_iconv_instance
-        require 'iconv'
-
-        @iconv = (Iconv.new("#{@to}//TRANSLIT//IGNORE", @from) rescue (Rails.logger.error("Iconv cannot convert to #{@to}: #{$!}\nNo conversion will take place"); nil))
-      end
-
-      def encode(string)
-        return string unless @iconv
-
-        @iconv.iconv(string) if @to =~ NON_ASCII_ENCODINGS
-      rescue StandardError
-        string
-      end
-    end
-
-    class StringEncoder < Encoder
-      def encode(string)
-        string.encode(@to, :invalid => :replace,
-                           :undef => :replace,
-                           :replace => "?")
-      rescue StandardError
-        string
-      end
-    end
-
     def initialize(objects = [], schema = {})
       return self if (@objects = objects).blank?
 
@@ -97,7 +47,6 @@ module RailsAdmin
 
       unless options[:encoding_to].blank?
         @encoding_to = options[:encoding_to]
-        @encoder = Encoder.factory(@encoding_to, @encoding_from)
       else
         @encoding_to = @encoding_from
       end
@@ -135,7 +84,9 @@ module RailsAdmin
       # But that way "English" users who don't bother and chooses to let utf8 by default won't get BOM added
       # and will not see it if Excel opens the file with a different encoding.
       csv_string = "\xEF\xBB\xBF#{csv_string.respond_to?(:force_encoding) ? csv_string.force_encoding('UTF-8') : csv_string}" if options[:encoding_to] == 'UTF-8'
-      csv_string = @encoder.encode(csv_string)
+      csv_string = csv_string.encode(@encoding_to, :invalid => :replace,
+                                                   :undef => :replace,
+                                                   :replace => "?")
       [!options[:skip_header], @encoding_to, csv_string]
     end
 
@@ -143,7 +94,9 @@ module RailsAdmin
 
     def output(str)
       unless @encoding_to =~ NON_ASCII_ENCODINGS  # can't use the csv generator with encodings that are no supersets of ASCII-7
-        @encoder.encode(str.to_s)
+        str.to_s.encode(@encoding_to, :invalid => :replace,
+                                      :undef => :replace,
+                                      :replace => "?")
       else
         str.to_s
       end
